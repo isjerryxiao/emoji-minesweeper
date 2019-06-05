@@ -3,7 +3,7 @@ const numbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣
 const iDevise = navigator.platform.match(/^iP/)
 const feedback = document.querySelector('.feedback')
 const emojiset = ['🔹', '💣', '🚩', '◻']
-const serverurl = 'http://localhost:8000/mscore.aspx'
+const serverurl = 'http://localhost:5000/mscore.aspx'
 
 class Game {
     constructor (cols, rows, number_of_bombs, usetwemoji) {
@@ -22,7 +22,7 @@ class Game {
 
 
     transfer = (data) => {
-        // report data:
+        // outgoing data:
         // new row col mines (existing game can override this)
         // move row col
         // return data:
@@ -39,19 +39,53 @@ class Game {
 
         http.onreadystatechange = () => {
             if (http.readyState == 4 && http.status == 200) {
-                console.log(http.responseText)
-            }
-            else {
-                console.log('http request failed for ...')
+                // console.log(http.responseText)
+                this.decodeScreenFromText(http.responseText)
+                this.updateScreen()
             }
         }
         http.send(data)
     }
 
-    sendmove = (row, col) => {
-        return undefined
+    decodeScreenFromText = (responseText) => {
+        let response = responseText.split(' ')
+        if (response.length == 1 + this.number_of_cells) {
+            switch (response[0]) {
+                case "win":
+                    console.log('win')
+                    break
+                case "die":
+                    console.log('die')
+                    break
+                case "cont":
+                    break
+                default:
+                    let [row_col, mine, moves, time] = response[0].split('_')
+                    let [row, col] = row_col.split('x')
+                    this.rows = row
+                    this.cols = col
+                    this.number_of_bombs = mine
+                    // this.start_time = time
+                    break
+            }
+            let scr_t = response.slice(1)
+            let scr = new Array()
+            console.log(scr_t)
+            for (let i of scr_t)
+                scr.push(Number(i))
+            this.screen = scr
+        }
+        else
+            console.log(`!! bad response from server ${responseText}`)
     }
 
+    sendMove = (row, col) => {
+        this.transfer(`move ${row} ${col}`)
+    }
+
+    sendInit = () => {
+        this.transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`)
+    }
 
     gentestscreen = () => {
         let map = new Array(this.number_of_cells)
@@ -61,10 +95,10 @@ class Game {
         return map
     }
 
-    updateScreen = (row, col) => {
+    updateScreen = () => {
         // upopened = 9, opened = 0-8, flagged = 10, stepped = 11
         for (let n = 0; n < this.number_of_cells; n++) {
-            [row, col] = this.getRowCol(n)
+            let [row, col] = this.getRowCol(n)
             let btn = this.map.childNodes[row].childNodes[col].childNodes[0]
             let grid = this.screen[n]
             let old = this.screen_old[n]
@@ -83,7 +117,7 @@ class Game {
                 console.log(`!! grid ${n} is ${grid}`)
             btn.appendChild(emoji)
         }
-        return undefined
+        this.screen_old = this.screen
     }
 
 
@@ -132,14 +166,17 @@ class Game {
         this.resetMetadata()
         this.bindEvents()
         //this.updateBombsLeft()
-        this.screen = this.gentestscreen()
-        this.updateScreen()
+
+        this.sendInit()
+        //this.screen = this.gentestscreen()
+        //this.updateScreen()
       }
 
     makeMove = (row, col) => {
         if (row < 0 || col < 0)
             console.log(`!! bad row col: ${[row, col]}`)
         else {
+            this.sendMove(row, col)
             console.log(`${[row, col]}`)
         }
     }
