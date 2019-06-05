@@ -21,13 +21,29 @@ def index():
     query = query.split(' ')
     if query:
         if len(query) == 4 and query[0] == 'new':
-            (row, col, mines) = [int(x) for x in query[1:]]
-            board_world = Board(row, col, mines)
-            b = ' '.join([str(UNOPENED_CELL)] * (row * col))
-            ret = f'cont {b}'
+            if board_world and board_world.state == 1:
+                b = board_world
+                ret = f'{b.height}x{b.width}_{b.mines}_0 '
+                ret += update(board_world, 0, 0, False)
+            else:
+                (row, col, mines) = [int(x) for x in query[1:]]
+                board_world = Board(row, col, mines)
+                ret = f'{row}x{col}_{mines}_0 '
+                ret += '9 ' * (row * col - 1)
+                ret += '9'
         elif len(query) == 3 and query[0] == 'move':
-            (row, col) = [int(x) for x in query[1:]]
-            ret = f'cont {update(board_world, row, col)}'
+            if board_world is None:
+                ret = 'Failed'
+            else:
+                (row, col) = [int(x) for x in query[1:]]
+                cells = update(board_world, row, col)
+                if board_world.state == 2:
+                    flag = 'win'
+                elif board_world.state == 3:
+                    flag = 'die'
+                else:
+                    flag = 'cont'
+                ret = f'{flag} {cells}'
         else:
             ret = 'Failed'
             print(query)
@@ -35,8 +51,9 @@ def index():
     return resp
 
 
-def update(board, row, col):
-    board.move((row, col))
+def update(board, row, col, move=True):
+    if move:
+        board.move((row, col))
     cells = list()
     for row in range(board.height):
         for col in range(board.width):

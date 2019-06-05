@@ -59,7 +59,7 @@
       })
 
       function restart () {
-        clearInterval(game.timer)
+        //clearInterval(game.timer)
         game = new Game(cols.value, rows.value, bombs.value, document.getElementById('twemoji').checked)
         document.querySelector('.js-settings-popup').classList.remove('show')
         return false

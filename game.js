@@ -5,6 +5,31 @@ const feedback = document.querySelector('.feedback')
 const emojiset = ['🔹', '💣', '🚩', '◻']
 const serverurl = 'http://localhost:5000/mscore.aspx'
 
+const Transfer = (data, callback) => {
+    // outgoing data:
+    // new row col mines (existing game can override this)
+    // move row col
+    // return data:
+    // [x]x[y]_[mine]_[moves]_[time] grid1 grid2 grid3 ... (for new command)
+    // win grid1 grid2 grid3 ...
+    // die grid1 grid2 grid3 ...
+    // cont grid1 grid2 grid3 ...
+
+    let http = new XMLHttpRequest()
+    http.open('POST', serverurl, true)
+
+    // We are sending plain text
+    http.setRequestHeader('Content-type', 'text/plain')
+
+    http.onreadystatechange = () => {
+        if (http.readyState == 4 && http.status == 200) {
+            // console.log(http.responseText)
+            callback(http.responseText)
+        }
+    }
+    http.send(data)
+}
+
 class Game {
     constructor (cols, rows, number_of_bombs, usetwemoji) {
         this.number_of_cells = cols * rows
@@ -17,82 +42,79 @@ class Game {
         this.usetwemoji = usetwemoji || false
         this.screen = new Array(this.number_of_cells)
         this.screen_old = new Array(this.number_of_cells)
+        this.state = 0 // 0 for not prepared, 1 for normal, 2 for won, 3 for dead.
         this.init()
     }
 
-
-    transfer = (data) => {
-        // outgoing data:
-        // new row col mines (existing game can override this)
-        // move row col
-        // return data:
-        // win grid1 grid2 grid3 ...
-        // die grid1 grid2 grid3 ...
-        // cont grid1 grid2 grid3 ...
-        // [x]x[y]_[mine]_[moves]_[time] grid1 grid2 grid3 ...
-
-        let http = new XMLHttpRequest()
-        http.open('POST', serverurl, true)
-
-        // We are sending plain text
-        http.setRequestHeader('Content-type', 'text/plain')
-
-        http.onreadystatechange = () => {
-            if (http.readyState == 4 && http.status == 200) {
-                // console.log(http.responseText)
-                this.decodeScreenFromText(http.responseText)
-                this.updateScreen()
-            }
-        }
-        http.send(data)
-    }
-
-    decodeScreenFromText = (responseText) => {
+    decodeUpdateScreen = (responseText) => {
         let response = responseText.split(' ')
+
         if (response.length == 1 + this.number_of_cells) {
             switch (response[0]) {
                 case "win":
-                    console.log('win')
+                    this.state = 2
+                    document.querySelector('.wrapper').classList.add('won')
+                    let wemoji = '😎'
+                    document.getElementById('result').innerHTML = this.usetwemoji ? twemoji.parse(wemoji) : wemoji
                     break
                 case "die":
-                    console.log('die')
+                    this.state = 3
+                    document.querySelector('.wrapper').classList.add('lost')
+                    let lemoji = '😵'
+                    document.getElementById('result').innerHTML = this.usetwemoji ? twemoji.parse(lemoji) : lemoji
                     break
                 case "cont":
                     break
                 default:
-                    let [row_col, mine, moves, time] = response[0].split('_')
-                    let [row, col] = row_col.split('x')
-                    this.rows = row
-                    this.cols = col
-                    this.number_of_bombs = mine
-                    // this.start_time = time
-                    break
+                    console.log(`!! invalid responseText ${responseText}`)
+                    return undefined
             }
             let scr_t = response.slice(1)
             let scr = new Array()
-            console.log(scr_t)
             for (let i of scr_t)
                 scr.push(Number(i))
             this.screen = scr
+            this.updateScreen()
         }
         else
             console.log(`!! bad response from server ${responseText}`)
     }
 
     sendMove = (row, col) => {
-        this.transfer(`move ${row} ${col}`)
+        if (this.state != 1) {
+            console.log('state: ' + this.state)
+            return
+        }
+        Transfer(`move ${row} ${col}`, this.decodeUpdateScreen)
     }
 
     sendInit = () => {
-        this.transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`)
+        Transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`, this.checkInitParams)
     }
 
-    gentestscreen = () => {
-        let map = new Array(this.number_of_cells)
-        for (let i=0; i<=9; i++)
-            for (let j=0; j<=9; j++)
-                map[this.getIndex(i, j)] = 11 - j
-        return map
+    checkInitParams = (responseText) => {
+        try {
+            let response = responseText.split(' ')
+            let [row_col, mines, moves, time] = response[0].split('_')
+            let [row, col] = row_col.split('x')
+            if (this.rows == row && this.cols == col && this.number_of_bombs == mines) {
+                this.state = 1
+                this.decodeUpdateScreen('cont ' + response.slice(1).join(' '))
+            }
+            else {
+                console.log(response)
+                console.log([row_col, mines, moves, time])
+                document.getElementById('rows').value = row
+                document.getElementById('cols').value = col
+                document.getElementById('bombs').value = mines
+                // restart game with proper parameters
+                document.querySelector('.js-new-game').click()
+            }
+            // this.start_time = time
+        } catch (err) {
+            console.log(err)
+            console.log('You may restart the game.')
+        }
     }
 
     updateScreen = () => {
@@ -137,6 +159,7 @@ class Game {
 
     init = () => {
         this.prepareEmoji()
+        console.log(this.number_of_bombs, this.number_of_cells)
         if (this.number_of_cells > 300) { alert('too big, should have less than 300 cells'); return false }
         if (this.number_of_cells <= this.number_of_bombs) { alert('more bombs than cells, can\'t do it'); return false }
         this.map.innerHTML = ''
@@ -146,21 +169,21 @@ class Game {
         // <div role='row'>
 
         for (let n = 0; n < this.number_of_cells; n++) {
-          var cell = document.createElement('span')
-          cell.setAttribute('role', 'gridcell') // <span role="gridcell">
-          cell.setAttribute('num', n)
-          var mine = document.createElement('button')
-          mine.type = 'button'
-          mine.setAttribute('aria-label', 'Field')
-          mine.className = 'cell'
-          mine.appendChild(this.emojiset[3].cloneNode())
-          cell.appendChild(mine)
-          row.appendChild(cell)
-          if (this.getRowCol(n)[1] + 1 == this.cols)  {
-            this.map.appendChild(row)
-            row = document.createElement('div')
-            row.setAttribute('role', 'row')
-          }
+            var cell = document.createElement('span')
+            cell.setAttribute('role', 'gridcell') // <span role="gridcell">
+            cell.setAttribute('num', n)
+            var mine = document.createElement('button')
+            mine.type = 'button'
+            mine.setAttribute('aria-label', 'Field')
+            mine.className = 'cell'
+            mine.appendChild(this.emojiset[3].cloneNode())
+            cell.appendChild(mine)
+            row.appendChild(cell)
+            if (this.getRowCol(n)[1] + 1 == this.cols)  {
+                this.map.appendChild(row)
+                row = document.createElement('div')
+                row.setAttribute('role', 'row')
+            }
         }
 
         this.resetMetadata()
@@ -168,8 +191,6 @@ class Game {
         //this.updateBombsLeft()
 
         this.sendInit()
-        //this.screen = this.gentestscreen()
-        //this.updateScreen()
       }
 
     makeMove = (row, col) => {
@@ -177,7 +198,6 @@ class Game {
             console.log(`!! bad row col: ${[row, col]}`)
         else {
             this.sendMove(row, col)
-            console.log(`${[row, col]}`)
         }
     }
 
@@ -197,31 +217,31 @@ class Game {
     prepareEmoji = () => {
         let that = this
         function makeEmojiElement (emoji) {
-          var ele
-          if (that.usetwemoji) {
-            if (emoji.src) {
-              ele = emoji
+            var ele
+            if (that.usetwemoji) {
+                if (emoji.src) {
+                    ele = emoji
+                } else {
+                    ele = document.createElement('img')
+                    ele.className = 'emoji'
+                    ele.setAttribute('aria-hidden', 'true')
+                    ele.src = twemoji.parse(emoji).match(/src=\"(.+)\">/)[1]
+                }
             } else {
-              ele = document.createElement('img')
-              ele.className = 'emoji'
-              ele.setAttribute('aria-hidden', 'true')
-              ele.src = twemoji.parse(emoji).match(/src=\"(.+)\">/)[1]
+                ele = document.createTextNode(emoji.alt || emoji.data || emoji)
             }
-          } else {
-            ele = document.createTextNode(emoji.alt || emoji.data || emoji)
-          }
-          return ele
+            return ele
         }
 
         this.emojiset = this.emojiset.map(makeEmojiElement)
         this.numbermoji = this.numbermoji.map(makeEmojiElement)
       }
 
-      resetMetadata = () => {
+    resetMetadata = () => {
         document.getElementById('timer').textContent = '0.00'
         document.querySelector('.wrapper').classList.remove('won', 'lost')
         document.querySelector('.result-emoji').textContent = ''
         document.querySelector('.default-emoji').innerHTML = this.usetwemoji ? twemoji.parse('😀') : '😀'
         document.querySelector('.js-settings').innerHTML = this.usetwemoji ? twemoji.parse('🔧') : '🔧'
-      }
+    }
 }
