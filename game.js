@@ -5,30 +5,6 @@ const feedback = document.querySelector('.feedback')
 const emojiset = ['🔹', '💣', '🚩', '◻']
 const serverurl = 'http://localhost:5000/mscore.aspx'
 
-const Transfer = (data, callback) => {
-    // outgoing data:
-    // new row col mines (existing game can override this)
-    // move row col
-    // return data:
-    // [x]x[y]_[mine]_[moves]_[time] grid1 grid2 grid3 ... (for new command)
-    // win grid1 grid2 grid3 ...
-    // die grid1 grid2 grid3 ...
-    // cont grid1 grid2 grid3 ...
-
-    let http = new XMLHttpRequest()
-    http.open('POST', serverurl, true)
-
-    // We are sending plain text
-    http.setRequestHeader('Content-type', 'text/plain')
-
-    http.onreadystatechange = () => {
-        if (http.readyState == 4 && http.status == 200) {
-            // console.log(http.responseText)
-            callback(http.responseText)
-        }
-    }
-    http.send(data)
-}
 
 class Game {
     constructor (cols, rows, number_of_bombs, usetwemoji) {
@@ -40,36 +16,68 @@ class Game {
         this.emojiset = emojiset
         this.numbermoji = [this.emojiset[0]].concat(numbers)
         this.usetwemoji = usetwemoji || false
-        this.screen = new Array(this.number_of_cells)
-        this.screen_old = new Array(this.number_of_cells)
         this.state = 0 // 0 for not prepared, 1 for normal, 2 for won, 3 for dead.
+        this.update_timer = undefined
+        this.is_updating = false
+        this.time = 0
+        this.moves = 0
         this.init()
     }
 
-    decodeUpdateScreen = (responseText) => {
-        let response = responseText.split(' ')
+    cleanup = () => {
+        clearInterval(this.update_timer)
+    }
 
-        if (response.length == 1 + this.number_of_cells) {
-            switch (response[0]) {
-                case "win":
-                    this.state = 2
+    transfer = (data, callback, ...callback_args) => {
+        // outgoing data:
+        // new row col mines (existing game can override this)
+        // move row col
+        // refresh
+        // return data:
+        // [x]x[y]_[mine]_[moves]_[time]_[state] grid1 grid2 grid3 ...
+        if (this.is_updating) {
+            console.log('A transfer event is aborted.')
+            return
+        }
+        this.is_updating = true
+        let http = new XMLHttpRequest()
+        http.open('POST', serverurl, true)
+
+        // We are sending plain text
+        http.setRequestHeader('Content-type', 'text/plain')
+
+        http.onreadystatechange = () => {
+            if (http.readyState == 4 && http.status == 200) {
+                // console.log(http.responseText)
+                callback(http.responseText, ...callback_args)
+                this.is_updating = false
+            }
+        }
+        http.send(data)
+    }
+
+    decodeUpdateScreen = (response) => {
+        if (response.length == this.number_of_cells) {
+            switch (this.state) {
+                case 2:
+                    this.cleanup()
                     document.querySelector('.wrapper').classList.add('won')
                     let wemoji = '😎'
                     document.getElementById('result').innerHTML = this.usetwemoji ? twemoji.parse(wemoji) : wemoji
                     break
-                case "die":
-                    this.state = 3
+                case 3:
+                    this.cleanup()
                     document.querySelector('.wrapper').classList.add('lost')
                     let lemoji = '😵'
                     document.getElementById('result').innerHTML = this.usetwemoji ? twemoji.parse(lemoji) : lemoji
                     break
-                case "cont":
+                case 1:
                     break
                 default:
-                    console.log(`!! invalid responseText ${responseText}`)
+                    console.log(`!! invalid state ${this.state}`)
                     return undefined
             }
-            let scr_t = response.slice(1)
+            let scr_t = response
             let scr = new Array()
             for (let i of scr_t)
                 scr.push(Number(i))
@@ -77,7 +85,7 @@ class Game {
             this.updateScreen()
         }
         else
-            console.log(`!! bad response from server ${responseText}`)
+            console.log(`!! bad response from server ${response}`)
     }
 
     sendMove = (row, col) => {
@@ -85,30 +93,52 @@ class Game {
             console.log('state: ' + this.state)
             return
         }
-        Transfer(`move ${row} ${col}`, this.decodeUpdateScreen)
+        this.transfer(`move ${row} ${col}`, this.checkParams, `(${row}, ${col}) clicked`)
     }
 
+    sendRefresh = () => {
+        this.transfer('refresh', this.checkParams)
+    }
     sendInit = () => {
-        Transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`, this.checkInitParams)
+        this.transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`, this.checkParams)
     }
 
-    checkInitParams = (responseText) => {
+    checkParams = (responseText, logmsg=false) => {
         try {
+            if (responseText == 'NoGame') { document.querySelector('.js-new-game').click() }
+            if (responseText == 'Failed') { console.log('server Fail'); return }
             let response = responseText.split(' ')
-            let [row_col, mines, moves, time] = response[0].split('_')
+            if (logmsg)
+                console.log(logmsg)
+            let [row_col, mines, moves, time, state] = response[0].split('_')
             let [row, col] = row_col.split('x')
             if (this.rows == row && this.cols == col && this.number_of_bombs == mines) {
-                this.state = 1
-                this.decodeUpdateScreen('cont ' + response.slice(1).join(' '))
+                this.time = Number(time)
+                this.moves = Number(moves)
+                document.getElementById('moves').textContent = this.moves
+                let seconds = 0
+                if (this.time == 0)
+                    seconds = 0
+                else
+                    seconds = (new Date() / 1000 - this.time).toFixed(0)
+                document.getElementById('timer').textContent = seconds
+                this.state = Number(state)
+                this.decodeUpdateScreen(response.slice(1))
+
+
             }
             else {
-                console.log(response)
-                console.log([row_col, mines, moves, time])
-                document.getElementById('rows').value = row
-                document.getElementById('cols').value = col
-                document.getElementById('bombs').value = mines
-                // restart game with proper parameters
-                document.querySelector('.js-new-game').click()
+                if (row > 0 && col > 0 && row * col > mines) {
+                    document.getElementById('rows').value = row
+                    document.getElementById('cols').value = col
+                    document.getElementById('bombs').value = mines
+                    // restart game with proper parameters
+                    console.log('Request board resize')
+                    this.cleanup()
+                    document.querySelector('.js-new-game').click()
+                }
+                else
+                    console.log(`!! server reported invalid size ${[row, col, mines]}`)
             }
             // this.start_time = time
         } catch (err) {
@@ -159,9 +189,19 @@ class Game {
 
     init = () => {
         this.prepareEmoji()
-        console.log(this.number_of_bombs, this.number_of_cells)
-        if (this.number_of_cells > 300) { alert('too big, should have less than 300 cells'); return false }
-        if (this.number_of_cells <= this.number_of_bombs) { alert('more bombs than cells, can\'t do it'); return false }
+        let setDefaults = () => {
+            this.rows = 10
+            this.cols = 10
+            this.number_of_bombs = 10
+            this.number_of_cells = this.cols * this.rows
+        }
+        if (this.number_of_cells > 300) { alert('too big, should have less than 300 cells, use defaults'); setDefaults() }
+        if (this.number_of_cells <= this.number_of_bombs) { alert('more bombs than cells, use defaults'); setDefaults() }
+        console.log(`Started a new game with [row, col, mines] ${[this.rows, this.cols, this.number_of_bombs]}`)
+
+        this.screen = new Array(this.number_of_cells)
+        this.screen_old = new Array(this.number_of_cells)
+
         this.map.innerHTML = ''
 
         var row = document.createElement('div')
@@ -191,6 +231,7 @@ class Game {
         //this.updateBombsLeft()
 
         this.sendInit()
+        this.update_timer = setInterval(this.sendRefresh, 1000)
       }
 
     makeMove = (row, col) => {
@@ -238,7 +279,7 @@ class Game {
       }
 
     resetMetadata = () => {
-        document.getElementById('timer').textContent = '0.00'
+        document.getElementById('timer').textContent = '0'
         document.querySelector('.wrapper').classList.remove('won', 'lost')
         document.querySelector('.result-emoji').textContent = ''
         document.querySelector('.default-emoji').innerHTML = this.usetwemoji ? twemoji.parse('😀') : '😀'
