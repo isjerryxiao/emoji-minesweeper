@@ -31,7 +31,7 @@ def index():
             else:
                 (row, col, mines) = [int(x) for x in query[1:]]
                 board_world = Board(row, col, mines)
-                setattr(board_world, 'start_time', int(time()))
+                setattr(board_world, 'start_time', 0)
                 ret = f'{row}x{col}_{mines}_0_0_1 '
                 ret += ' '.join(['9'] * (row * col))
         elif len(query) == 1 and query[0] == 'refresh':
@@ -51,6 +51,8 @@ def index():
                 ret = 'NoGame'
             else:
                 (row, col) = [int(x) for x in query[1:]]
+                if board_world.state == 0:
+                    setattr(board_world, 'start_time', int(time()))
                 cells = update(board_world, row, col)
                 b = board_world
                 r = f'{b.height}x{b.width}_{b.mines}_{b.moves}_{b.start_time}_{b.state}'

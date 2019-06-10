@@ -1,10 +1,9 @@
 /* global twemoji, alert, MouseEvent, game */
 const numbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
-const iDevise = navigator.platform.match(/^iP/)
-const feedback = document.querySelector('.feedback')
 const emojiset = ['🔹', '💣', '🚩', '◻']
 const serverurl = 'http://localhost:5000/mscore.aspx'
-
+const update_timeout = 2
+const update_timeout_min = 1
 
 class Game {
     constructor (cols, rows, number_of_bombs, usetwemoji) {
@@ -18,7 +17,9 @@ class Game {
         this.usetwemoji = usetwemoji || false
         this.state = 0 // 0 for not prepared, 1 for normal, 2 for won, 3 for dead.
         this.update_timer = undefined
-        this.is_updating = false
+        this.is_user_updating = false
+        this.is_refreshing = false
+        this.last_update = 0
         this.time = 0
         this.moves = 0
         this.init()
@@ -28,18 +29,34 @@ class Game {
         clearInterval(this.update_timer)
     }
 
-    transfer = (data, callback, ...callback_args) => {
+    transfer = (data, callback, is_userinput, ...callback_args) => {
         // outgoing data:
         // new row col mines (existing game can override this)
         // move row col
         // refresh
         // return data:
         // [x]x[y]_[mine]_[moves]_[time]_[state] grid1 grid2 grid3 ...
-        if (this.is_updating) {
-            console.log('A transfer event is aborted.')
+        let utime_now = (new Date() / 1000).toFixed(2)
+        if ((! is_userinput) && (utime_now - this.last_update < update_timeout_min) || this.is_refreshing) {
+            console.log('An auto-refresh event is aborted. Reason: too soon.')
             return
         }
-        this.is_updating = true
+        if (this.is_user_updating) {
+            if (is_userinput) {
+                console.log('A user-input event is aborted. Reason: another one is running.')
+            }
+            else {
+                console.log('An auto-refresh event is aborted. Reason: user input await.')
+            }
+            return
+        }
+        this.last_update = utime_now
+        if (is_userinput) {
+            this.is_user_updating = true
+        }
+        else{
+            this.is_refreshing = true
+        }
         let http = new XMLHttpRequest()
         http.open('POST', serverurl, true)
 
@@ -49,8 +66,25 @@ class Game {
         http.onreadystatechange = () => {
             if (http.readyState == 4 && http.status == 200) {
                 // console.log(http.responseText)
+                if (! is_userinput && this.is_user_updating) {
+                    console.log('An auto-refresh event is aborted on 200. Reason: user input await.')
+                    return
+                }
                 callback(http.responseText, ...callback_args)
-                this.is_updating = false
+                if (is_userinput) {
+                    this.is_user_updating = false
+                }
+                else {
+                    this.is_refreshing = false
+                }
+            }
+        }
+        http.onabort = http.onerror = () => {
+            if (is_userinput) {
+                this.is_user_updating = false
+            }
+            else {
+                this.is_refreshing = false
             }
         }
         http.send(data)
@@ -93,14 +127,14 @@ class Game {
             console.log('state: ' + this.state)
             return
         }
-        this.transfer(`move ${row} ${col}`, this.checkParams, `(${row}, ${col}) clicked`)
+        this.transfer(`move ${row} ${col}`, this.checkParams, true, `(${row}, ${col}) clicked`)
     }
 
     sendRefresh = () => {
-        this.transfer('refresh', this.checkParams)
+        this.transfer('refresh', this.checkParams, false)
     }
     sendInit = () => {
-        this.transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`, this.checkParams)
+        this.transfer(`new ${this.rows} ${this.cols} ${this.number_of_bombs}`, this.checkParams, true)
     }
 
     checkParams = (responseText, logmsg=false) => {
@@ -231,7 +265,7 @@ class Game {
         //this.updateBombsLeft()
 
         this.sendInit()
-        this.update_timer = setInterval(this.sendRefresh, 1000)
+        this.update_timer = setInterval(this.sendRefresh, 1000 * update_timeout)
       }
 
     makeMove = (row, col) => {
